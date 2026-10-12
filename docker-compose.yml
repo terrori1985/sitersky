@@ -1,0 +1,56 @@
+services:
+  kharkiv-market:
+    build: .
+    container_name: kharkiv-market
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      # SMS-провайдер: dev | twilio | webhook
+      - SMS_PROVIDER=dev
+      # --- Twilio (раскомментируйте для реальных SMS) ---
+      # - TWILIO_ACCOUNT_SID=AC...
+      # - TWILIO_AUTH_TOKEN=...
+      # - TWILIO_FROM=+15551234567
+      # --- Или свой шлюз ---
+      # - SMS_PROVIDER=webhook
+      # - SMS_WEBHOOK_URL=https://...
+      # Безопасность за TLS-прокси (nginx/caddy/traefik):
+      - COOKIE_SECURE=0
+      - SESSION_DAYS=30
+    volumes:
+      - km-data:/app/data
+
+  # ── Публичный адрес в интернете (Cloudflare Tunnel, бесплатно) ──────────
+  # Быстрый режим: `docker compose up -d --profile tunnel`
+  # Адрес появится в логах: docker compose logs tunnel | grep trycloudflare
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: km-tunnel
+    restart: unless-stopped
+    depends_on:
+      - kharkiv-market
+    command: tunnel --url http://kharkiv-market:3000
+    profiles: ["tunnel"]
+
+  # Постоянный адрес (нужен домен на Cloudflare + токен туннеля):
+  # 1) https://dash.cloudflare.com → Zero Trust → Networks → Tunnels → Create
+  # 2) скопируйте токен в .env:  TUNNEL_TOKEN=eyJ...
+  # 3) docker compose up -d --profile named
+  # В настройках туннеля укажите service: http://kharkiv-market:3000
+  tunnel-named:
+    image: cloudflare/cloudflared:latest
+    container_name: km-tunnel-named
+    restart: unless-stopped
+    depends_on:
+      - kharkiv-market
+    command: tunnel run --token ${TUNNEL_TOKEN:-}
+    profiles: ["named"]
+
+# Именованный том: Docker сам выставляет права для пользователя `node`
+# (bind-папка ./data на VPS создаётся от root и ломает запуск).
+volumes:
+  km-data:
